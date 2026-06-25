@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { api } from './api.js';
 
 const commas = (n) =>
   n == null || n === '' || isNaN(n) ? '' : Number(n).toLocaleString('en-US');
@@ -11,6 +12,7 @@ const usd = (n) =>
 export default function App() {
   const [deal, setDeal] = useState({
     name: '',
+    address: '',
     squareFootage: '',
     askingPrice: '',
     offerPct: '',
@@ -58,7 +60,14 @@ export default function App() {
     },
   });
   const [showSettings, setShowSettings] = useState(false);
-  const [tab, setTab] = useState('deal'); // 'deal' | 'proforma'
+  const [tab, setTab] = useState('deal'); // 'deal' | 'proforma' | 'pipeline'
+
+  // Persistence state
+  const [currentDealId, setCurrentDealId] = useState(null); // null = unsaved/new
+  const [saveState, setSaveState] = useState('idle');       // idle | saving | saved | error
+  const [saveError, setSaveError] = useState('');
+  const [pipeline, setPipeline] = useState([]);
+  const [pipelineLoading, setPipelineLoading] = useState(false);
 
   // Proforma inputs (10-year projection)
   const [proforma, setProforma] = useState({
@@ -77,6 +86,86 @@ export default function App() {
       arr[idx] = value;
       return { ...p, [key]: arr };
     });
+
+  // ---- Persistence ----
+  // The full input state that gets saved (restores a deal exactly).
+  const snapshot = () => ({ deal, settings, proforma });
+
+  async function saveDeal() {
+    setSaveState('saving');
+    setSaveError('');
+    try {
+      const data = snapshot();
+      if (currentDealId) {
+        await api.updateDeal(currentDealId, data);
+      } else {
+        const created = await api.createDeal(data, 'active');
+        setCurrentDealId(created.id);
+      }
+      setSaveState('saved');
+      setTimeout(() => setSaveState('idle'), 2000);
+    } catch (err) {
+      setSaveState('error');
+      setSaveError(err.message || 'Save failed');
+    }
+  }
+
+  async function loadPipeline() {
+    setPipelineLoading(true);
+    try {
+      const list = await api.listDeals();
+      setPipeline(list);
+    } catch (err) {
+      setPipeline([]);
+    } finally {
+      setPipelineLoading(false);
+    }
+  }
+
+  async function openDeal(id) {
+    try {
+      const row = await api.getDeal(id);
+      const d = row.data || {};
+      if (d.deal) setDeal(d.deal);
+      if (d.settings) setSettings(d.settings);
+      if (d.proforma) setProforma(d.proforma);
+      setCurrentDealId(row.id);
+      setTab('deal');
+    } catch (err) {
+      alert('Could not open deal: ' + (err.message || 'error'));
+    }
+  }
+
+  async function changeStatus(id, status) {
+    try {
+      await api.setStatus(id, status);
+      loadPipeline();
+    } catch (err) {
+      alert('Could not change status: ' + (err.message || 'error'));
+    }
+  }
+
+  async function removeDeal(id) {
+    if (!confirm('Delete this deal? This cannot be undone.')) return;
+    try {
+      await api.deleteDeal(id);
+      if (currentDealId === id) setCurrentDealId(null);
+      loadPipeline();
+    } catch (err) {
+      alert('Could not delete: ' + (err.message || 'error'));
+    }
+  }
+
+  function newDeal() {
+    setCurrentDealId(null);
+    setDeal((d) => ({ ...d, name: '', address: '' }));
+    setSaveState('idle');
+  }
+
+  // Load the pipeline list whenever that tab opens.
+  useEffect(() => {
+    if (tab === 'pipeline') loadPipeline();
+  }, [tab]);
 
   const set = (key, value) => setDeal((d) => ({ ...d, [key]: value }));
   const setPsf = (key, value) =>
@@ -375,12 +464,20 @@ export default function App() {
       <header className="masthead">
         <div className="brand">
           Otima Investments
-          <span className="sub">Deal Underwriting</span>
+          <span className="sub">Deal Underwriting{currentDealId ? ` · #${currentDealId}` : ' · unsaved'}</span>
         </div>
-        <button className="settings-btn" onClick={() => setShowSettings((s) => !s)}>
-          {showSettings ? 'Close settings' : 'Settings'}
-        </button>
+        <div className="masthead-actions">
+          <button className="save-btn" onClick={saveDeal} disabled={saveState === 'saving'}>
+            {saveState === 'saving' ? 'Saving…'
+              : saveState === 'saved' ? 'Saved ✓'
+              : currentDealId ? 'Update Deal' : 'Save Deal'}
+          </button>
+          <button className="settings-btn" onClick={() => setShowSettings((s) => !s)}>
+            {showSettings ? 'Close settings' : 'Settings'}
+          </button>
+        </div>
       </header>
+      {saveState === 'error' && <div className="save-error">Save failed: {saveError}</div>}
 
       {showSettings && (
         <section className="panel settings-panel">
@@ -435,6 +532,7 @@ export default function App() {
       <div className="tabs">
         <button className={tab === 'deal' ? 'active' : ''} onClick={() => setTab('deal')}>Deal Inputs</button>
         <button className={tab === 'proforma' ? 'active' : ''} onClick={() => setTab('proforma')}>Proforma</button>
+        <button className={tab === 'pipeline' ? 'active' : ''} onClick={() => setTab('pipeline')}>Pipeline</button>
       </div>
 
       {tab === 'deal' && (
@@ -448,6 +546,15 @@ export default function App() {
               value={deal.name}
               onChange={(e) => set('name', e.target.value)}
               placeholder="e.g. Valley Crossing"
+            />
+          </Field>
+
+          <Field label="Address">
+            <input
+              className="text"
+              value={deal.address}
+              onChange={(e) => set('address', e.target.value)}
+              placeholder="e.g. 123 Main St, City, ST"
             />
           </Field>
 
@@ -675,7 +782,82 @@ export default function App() {
           refiYearNum={refiYearNum}
         />
       )}
+
+      {tab === 'pipeline' && (
+        <PipelineTab
+          pipeline={pipeline}
+          loading={pipelineLoading}
+          currentDealId={currentDealId}
+          onOpen={openDeal}
+          onStatus={changeStatus}
+          onDelete={removeDeal}
+          onNew={newDeal}
+          onRefresh={loadPipeline}
+        />
+      )}
     </div>
+  );
+}
+
+// ---- Pipeline Tab: saved deals grouped by status ----
+function PipelineTab({ pipeline, loading, currentDealId, onOpen, onStatus, onDelete, onNew, onRefresh }) {
+  const usd0 = (n) =>
+    n == null || isNaN(n) ? '—'
+      : Number(n).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+
+  const groups = [
+    { key: 'active', label: 'Active' },
+    { key: 'accepted', label: 'Accepted' },
+    { key: 'declined', label: 'Declined' },
+  ];
+
+  return (
+    <section className="panel">
+      <h2 className="with-toggle">
+        Deal Pipeline
+        <span>
+          <button className="settings-btn" onClick={onNew} style={{ marginRight: 8 }}>+ New Deal</button>
+          <button className="settings-btn" onClick={onRefresh}>Refresh</button>
+        </span>
+      </h2>
+
+      {loading && <p className="explainer">Loading deals…</p>}
+      {!loading && pipeline.length === 0 && (
+        <p className="explainer">No saved deals yet. Build a deal on the Deal Inputs tab and click “Save Deal”.</p>
+      )}
+
+      {!loading && groups.map((g) => {
+        const items = pipeline.filter((d) => d.status === g.key);
+        if (!items.length) return null;
+        return (
+          <div key={g.key} className="pipe-group">
+            <div className="pipe-group-head">{g.label} <span className="pipe-count">{items.length}</span></div>
+            <table className="pipe-table">
+              <thead>
+                <tr><th>Name</th><th>Address</th><th>Purchase Price</th><th>Updated</th><th></th></tr>
+              </thead>
+              <tbody>
+                {items.map((d) => (
+                  <tr key={d.id} className={d.id === currentDealId ? 'pipe-current' : ''}>
+                    <td>{d.name || <span className="pipe-dim">Untitled</span>}</td>
+                    <td className="pipe-dim">{d.address || '—'}</td>
+                    <td>{usd0(d.purchase_price)}</td>
+                    <td className="pipe-dim">{new Date(d.updated_at).toLocaleDateString()}</td>
+                    <td className="pipe-actions">
+                      <button onClick={() => onOpen(d.id)}>Open</button>
+                      {d.status !== 'accepted' && <button onClick={() => onStatus(d.id, 'accepted')}>Accept</button>}
+                      {d.status !== 'declined' && <button onClick={() => onStatus(d.id, 'declined')}>Decline</button>}
+                      {d.status !== 'active' && <button onClick={() => onStatus(d.id, 'active')}>Reactivate</button>}
+                      <button className="pipe-del" onClick={() => onDelete(d.id)}>Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
+    </section>
   );
 }
 

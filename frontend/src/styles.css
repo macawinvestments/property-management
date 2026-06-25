@@ -206,3 +206,47 @@ body {
 .app.wide .pf-grid th, .app.wide .pf-grid td { padding: 7px 4px; }
 .app.wide .pf-grid .rowlabel { width: 150px; white-space: normal; }
 .app.wide .pf-cell-input { width: 100%; min-width: 0; padding: 5px 4px; }
+
+/* Masthead actions + save button */
+.masthead-actions { display: flex; gap: 10px; align-items: center; }
+.save-btn {
+  background: var(--gold); border: none; color: var(--ink);
+  font-family: 'Inter', sans-serif; font-weight: 600; font-size: 12px;
+  padding: 9px 18px; border-radius: 6px; cursor: pointer;
+}
+.save-btn:hover { background: var(--gold-soft); }
+.save-btn:disabled { opacity: 0.6; cursor: default; }
+.save-error {
+  background: rgba(180,60,60,0.15); border: 1px solid #b43c3c; color: #f0c0c0;
+  padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 13px;
+}
+
+/* Pipeline */
+.pipe-group { margin-bottom: 26px; }
+.pipe-group-head {
+  font-family: 'Inter', sans-serif; font-weight: 600; font-size: 12px;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold-soft);
+  margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+}
+.pipe-count {
+  background: var(--ink); border: 1px solid var(--ink-line); color: var(--muted);
+  border-radius: 10px; padding: 1px 8px; font-size: 11px;
+}
+.pipe-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pipe-table th {
+  text-align: left; color: var(--muted); font-weight: 500; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.06em; padding: 8px 10px;
+  border-bottom: 1px solid var(--gold);
+}
+.pipe-table td { padding: 10px; border-bottom: 1px solid var(--ink-line); color: var(--parchment); }
+.pipe-dim { color: var(--muted); }
+.pipe-current { background: rgba(200,162,76,0.06); }
+.pipe-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.pipe-actions button {
+  background: var(--ink); border: 1px solid var(--ink-line); color: var(--gold-soft);
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px; padding: 5px 10px;
+  border-radius: 4px; cursor: pointer;
+}
+.pipe-actions button:hover { border-color: var(--gold); }
+.pipe-actions .pipe-del { color: #d88; }
+.pipe-actions .pipe-del:hover { border-color: #b43c3c; }
