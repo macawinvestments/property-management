@@ -250,3 +250,37 @@ body {
 .pipe-actions button:hover { border-color: var(--gold); }
 .pipe-actions .pipe-del { color: #d88; }
 .pipe-actions .pipe-del:hover { border-color: #b43c3c; }
+
+/* Login gate */
+.login-wrap {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.login-card {
+  background: var(--ink-2); border: 1px solid var(--ink-line); border-radius: 12px;
+  padding: 36px 32px; width: 100%; max-width: 380px; box-shadow: var(--shadow);
+}
+.login-brand {
+  font-family: 'Fraunces', serif; font-weight: 600; font-size: 24px;
+  color: var(--parchment); margin-bottom: 28px; line-height: 1.2;
+}
+.login-brand .sub {
+  display: block; font-family: 'Inter', sans-serif; font-weight: 500;
+  font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--gold); margin-top: 5px;
+}
+.login-label { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); display: block; margin-bottom: 6px; }
+.login-input {
+  width: 100%; background: var(--ink); border: 1px solid var(--ink-line);
+  border-radius: 6px; color: var(--parchment); font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px; padding: 11px 12px; outline: none;
+}
+.login-input:focus { border-color: var(--gold); }
+.login-error { color: #e0a0a0; font-size: 12px; margin-top: 10px; }
+.login-btn {
+  width: 100%; margin-top: 18px; background: var(--gold); border: none; color: var(--ink);
+  font-family: 'Inter', sans-serif; font-weight: 600; font-size: 13px;
+  padding: 11px; border-radius: 6px; cursor: pointer;
+}
+.login-btn:hover { background: var(--gold-soft); }
+.login-btn:disabled { opacity: 0.5; cursor: default; }

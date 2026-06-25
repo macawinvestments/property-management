@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from './api.js';
+import { api, getPassword, setPassword, clearPassword } from './api.js';
 
 const commas = (n) =>
   n == null || n === '' || isNaN(n) ? '' : Number(n).toLocaleString('en-US');
@@ -9,7 +9,74 @@ const usd = (n) =>
     ? '$0'
     : n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 
+// Top-level wrapper: shows the login gate until a valid password is stored,
+// then renders the app. "Lock" clears the password and returns to the gate.
 export default function App() {
+  const [authed, setAuthed] = useState(() => Boolean(getPassword()));
+
+  if (!authed) {
+    return <LoginGate onUnlock={() => setAuthed(true)} />;
+  }
+  return (
+    <DealApp
+      onLock={() => {
+        clearPassword();
+        setAuthed(false);
+      }}
+    />
+  );
+}
+
+function LoginGate({ onUnlock }) {
+  const [pw, setPw] = useState('');
+  const [error, setError] = useState('');
+  const [checking, setChecking] = useState(false);
+
+  async function submit() {
+    setChecking(true);
+    setError('');
+    try {
+      const ok = await api.login(pw);
+      if (ok) {
+        setPassword(pw);
+        onUnlock();
+      } else {
+        setError('Incorrect password');
+      }
+    } catch {
+      setError('Could not reach the server');
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <div className="login-wrap">
+      <div className="login-card">
+        <div className="login-brand">
+          Otima Investments
+          <span className="sub">Deal Underwriting</span>
+        </div>
+        <label className="login-label">Password</label>
+        <input
+          className="login-input"
+          type="password"
+          value={pw}
+          autoFocus
+          onChange={(e) => setPw(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          placeholder="Enter password"
+        />
+        {error && <div className="login-error">{error}</div>}
+        <button className="login-btn" onClick={submit} disabled={checking || !pw}>
+          {checking ? 'Checking…' : 'Enter'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DealApp({ onLock }) {
   const [deal, setDeal] = useState({
     name: '',
     address: '',
@@ -475,6 +542,7 @@ export default function App() {
           <button className="settings-btn" onClick={() => setShowSettings((s) => !s)}>
             {showSettings ? 'Close settings' : 'Settings'}
           </button>
+          <button className="settings-btn" onClick={onLock} title="Log out">Lock</button>
         </div>
       </header>
       {saveState === 'error' && <div className="save-error">Save failed: {saveError}</div>}
