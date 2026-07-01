@@ -84,4 +84,30 @@ export const api = {
 
   deleteDeal: (id) =>
     fetch(`${API}/api/deals/${id}`, { method: 'DELETE', headers: authHeaders() }).then(handle),
+
+  // ---- Documents ----
+  listDocuments: (dealId, category) => {
+    const q = category ? `?category=${encodeURIComponent(category)}` : '';
+    return fetch(`${API}/api/documents/${dealId}${q}`, { headers: authHeaders() }).then(handle);
+  },
+
+  // Upload files (FormData). Do NOT set Content-Type — the browser sets the
+  // multipart boundary automatically. Password header still required.
+  uploadDocuments: (dealId, category, files) => {
+    const form = new FormData();
+    form.append('category', category);
+    for (const f of files) form.append('files', f);
+    return fetch(`${API}/api/documents/${dealId}`, {
+      method: 'POST',
+      headers: { 'x-app-password': getPassword() },
+      body: form,
+    }).then(handle);
+  },
+
+  // Get a short-lived signed URL to view/download a file.
+  getDocumentUrl: (docId) =>
+    fetch(`${API}/api/documents/file/${docId}`, { headers: authHeaders() }).then(handle),
+
+  deleteDocument: (docId) =>
+    fetch(`${API}/api/documents/file/${docId}`, { method: 'DELETE', headers: authHeaders() }).then(handle),
 };

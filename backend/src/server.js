@@ -3,6 +3,7 @@ import cors from 'cors';
 import { config } from './config.js';
 import { query } from './db/pool.js';
 import { dealsRouter } from './routes/deals.js';
+import { documentsRouter } from './routes/documents.js';
 import { requirePassword } from './middleware/auth.js';
 
 const app = express();
@@ -25,6 +26,9 @@ app.post('/api/login', (req, res) => {
 // Deals routes require the password header on every request.
 app.use('/api/deals', requirePassword, dealsRouter);
 
+// Documents routes also require the password.
+app.use('/api/documents', requirePassword, documentsRouter);
+
 // Health check — proves the server is up and tests the actual DB connection.
 app.get('/api/health', async (_req, res) => {
   let dbConnected = false;
@@ -40,6 +44,7 @@ app.get('/api/health', async (_req, res) => {
     time: new Date().toISOString(),
     dbConfigured: Boolean(config.databaseUrl),
     dbConnected,
+    r2Configured: Boolean(config.r2.accountId && config.r2.accessKeyId && config.r2.secretAccessKey),
   });
 });
 

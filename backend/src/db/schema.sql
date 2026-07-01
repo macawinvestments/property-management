@@ -17,3 +17,19 @@ CREATE TABLE IF NOT EXISTS deals (
 
 CREATE INDEX IF NOT EXISTS idx_deals_status ON deals(status);
 CREATE INDEX IF NOT EXISTS idx_deals_updated ON deals(updated_at DESC);
+
+-- The documents table. Files live in R2 (object storage); this table stores
+-- metadata + the storage key so we can list, download, and delete per deal.
+CREATE TABLE IF NOT EXISTS documents (
+  id           SERIAL PRIMARY KEY,
+  deal_id      INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+  category     TEXT NOT NULL DEFAULT 'others',   -- DD category key, or 'others'
+  filename     TEXT NOT NULL,
+  mime_type    TEXT,
+  size_bytes   BIGINT,
+  storage_key  TEXT NOT NULL,   -- key in the R2 bucket
+  uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_documents_deal ON documents(deal_id);
+CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(deal_id, category);

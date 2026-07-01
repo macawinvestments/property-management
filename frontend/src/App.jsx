@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { api, getPassword, setPassword, clearPassword } from './api.js';
+import { DD_CATEGORIES, DD_STATUSES, DD_PRIORITIES, DD_RISKS, ddItemId } from './dueDiligence.js';
 
 const commas = (n) =>
   n == null || n === '' || isNaN(n) ? '' : Number(n).toLocaleString('en-US');
@@ -154,9 +155,15 @@ function DealApp({ onLock }) {
       return { ...p, [key]: arr };
     });
 
+  // Due diligence tracking — keyed by "categoryKey:itemIndex". Each value is
+  // { status, priority, owner, requested, received, reviewed, risk, comments }.
+  const [dd, setDd] = useState({});
+  const setDdItem = (id, field, value) =>
+    setDd((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), [field]: value } }));
+
   // ---- Persistence ----
   // The full input state that gets saved (restores a deal exactly).
-  const snapshot = () => ({ deal, settings, proforma });
+  const snapshot = () => ({ deal, settings, proforma, dd });
 
   async function saveDeal() {
     setSaveState('saving');
@@ -196,6 +203,7 @@ function DealApp({ onLock }) {
       if (d.deal) setDeal(d.deal);
       if (d.settings) setSettings(d.settings);
       if (d.proforma) setProforma(d.proforma);
+      setDd(d.dd || {});
       setCurrentDealId(row.id);
       setTab('deal');
     } catch (err) {
@@ -226,6 +234,7 @@ function DealApp({ onLock }) {
   function newDeal() {
     setCurrentDealId(null);
     setDeal((d) => ({ ...d, name: '', address: '' }));
+    setDd({});
     setSaveState('idle');
   }
 
@@ -527,7 +536,7 @@ function DealApp({ onLock }) {
   }
 
   return (
-    <div className={`app ${tab === 'proforma' ? 'wide' : ''}`}>
+    <div className={`app ${tab === 'proforma' || tab === 'dd' ? 'wide' : ''}`}>
       <header className="masthead">
         <div className="brand">
           Otima Investments
@@ -538,6 +547,12 @@ function DealApp({ onLock }) {
             {saveState === 'saving' ? 'Saving…'
               : saveState === 'saved' ? 'Saved ✓'
               : currentDealId ? 'Update Deal' : 'Save Deal'}
+          </button>
+          <button
+            className={`settings-btn ${tab === 'pipeline' ? 'nav-active' : ''}`}
+            onClick={() => setTab(tab === 'pipeline' ? 'deal' : 'pipeline')}
+          >
+            Pipeline
           </button>
           <button className="settings-btn" onClick={() => setShowSettings((s) => !s)}>
             {showSettings ? 'Close settings' : 'Settings'}
@@ -600,7 +615,9 @@ function DealApp({ onLock }) {
       <div className="tabs">
         <button className={tab === 'deal' ? 'active' : ''} onClick={() => setTab('deal')}>Deal Inputs</button>
         <button className={tab === 'proforma' ? 'active' : ''} onClick={() => setTab('proforma')}>Proforma</button>
-        <button className={tab === 'pipeline' ? 'active' : ''} onClick={() => setTab('pipeline')}>Pipeline</button>
+        <button className={tab === 'property' ? 'active' : ''} onClick={() => setTab('property')}>Property Data</button>
+        <button className={tab === 'dd' ? 'active' : ''} onClick={() => setTab('dd')}>Due Diligence</button>
+        <button className={tab === 'documents' ? 'active' : ''} onClick={() => setTab('documents')}>Documents</button>
       </div>
 
       {tab === 'deal' && (
@@ -851,6 +868,18 @@ function DealApp({ onLock }) {
         />
       )}
 
+      {tab === 'property' && (
+        <PropertyTab deal={deal} set={set} />
+      )}
+
+      {tab === 'dd' && (
+        <DueDiligenceTab dd={dd} setDdItem={setDdItem} />
+      )}
+
+      {tab === 'documents' && (
+        <DocumentsTab currentDealId={currentDealId} />
+      )}
+
       {tab === 'pipeline' && (
         <PipelineTab
           pipeline={pipeline}
@@ -868,6 +897,289 @@ function DealApp({ onLock }) {
 }
 
 // ---- Pipeline Tab: saved deals grouped by status ----
+// ---- Documents Tab: folders (DD categories + Others), upload & preview ----
+const DOC_FOLDERS = [...DD_CATEGORIES.map((c) => ({ key: c.key, label: c.label })), { key: 'others', label: 'Others' }];
+
+function humanSize(bytes) {
+  if (bytes == null) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+function isPreviewable(mime, name) {
+  const m = (mime || '').toLowerCase();
+  const n = (name || '').toLowerCase();
+  if (m.startsWith('image/')) return true;
+  if (m === 'application/pdf' || n.endsWith('.pdf')) return true;
+  return false;
+}
+
+function DocumentsTab({ currentDealId }) {
+  const [activeFolder, setActiveFolder] = useState('corporate');
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function refresh() {
+    if (!currentDealId) return;
+    setLoading(true);
+    try {
+      const list = await api.listDocuments(currentDealId);
+      setDocs(list);
+    } catch (e) {
+      setError(e.message || 'Failed to load documents');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { if (currentDealId) refresh(); }, [currentDealId]);
+
+  async function handleUpload(files) {
+    if (!files || !files.length) return;
+    setUploading(true);
+    setError('');
+    try {
+      await api.uploadDocuments(currentDealId, activeFolder, files);
+      await refresh();
+    } catch (e) {
+      setError(e.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function openDoc(doc) {
+    try {
+      const { url } = await api.getDocumentUrl(doc.id);
+      window.open(url, '_blank', 'noopener');
+    } catch (e) {
+      setError(e.message || 'Could not open file');
+    }
+  }
+
+  async function removeDoc(doc) {
+    if (!confirm(`Delete "${doc.filename}"? This cannot be undone.`)) return;
+    try {
+      await api.deleteDocument(doc.id);
+      await refresh();
+    } catch (e) {
+      setError(e.message || 'Delete failed');
+    }
+  }
+
+  // Not saved yet — documents attach to a saved deal.
+  if (!currentDealId) {
+    return (
+      <section className="panel">
+        <h2>Documents</h2>
+        <p className="explainer">Save this deal first (use “Save Deal”), then you can upload documents to it.</p>
+      </section>
+    );
+  }
+
+  const countByFolder = (key) => docs.filter((d) => d.category === key).length;
+  const folderDocs = docs.filter((d) => d.category === activeFolder);
+  const activeLabel = DOC_FOLDERS.find((f) => f.key === activeFolder)?.label || '';
+
+  return (
+    <section className="panel">
+      <h2>Documents</h2>
+      {error && <div className="save-error">{error}</div>}
+
+      <div className="docs-layout">
+        <div className="docs-folders">
+          {DOC_FOLDERS.map((f) => (
+            <button
+              key={f.key}
+              className={`docs-folder ${activeFolder === f.key ? 'active' : ''}`}
+              onClick={() => setActiveFolder(f.key)}
+            >
+              <span className="docs-folder-icon">📁</span>
+              <span className="docs-folder-label">{f.label}</span>
+              <span className="docs-folder-count">{countByFolder(f.key)}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="docs-main">
+          <div className="docs-main-head">
+            <span className="docs-main-title">{activeLabel}</span>
+            <label className="docs-upload-btn">
+              {uploading ? 'Uploading…' : '+ Upload files'}
+              <input
+                type="file"
+                multiple
+                style={{ display: 'none' }}
+                disabled={uploading}
+                onChange={(e) => { handleUpload(Array.from(e.target.files)); e.target.value = ''; }}
+              />
+            </label>
+          </div>
+
+          {loading && <p className="explainer">Loading…</p>}
+          {!loading && folderDocs.length === 0 && (
+            <p className="explainer">No files in {activeLabel} yet. Upload PDFs, images, or Office documents (max 50MB each).</p>
+          )}
+
+          <div className="docs-list">
+            {folderDocs.map((doc) => (
+              <div key={doc.id} className="docs-file">
+                <div className="docs-file-info">
+                  <span className="docs-file-name">{doc.filename}</span>
+                  <span className="docs-file-meta">{humanSize(doc.size_bytes)} · {new Date(doc.uploaded_at).toLocaleDateString()}</span>
+                </div>
+                <div className="docs-file-actions">
+                  <button onClick={() => openDoc(doc)}>{isPreviewable(doc.mime_type, doc.filename) ? 'Preview' : 'Download'}</button>
+                  <button className="pipe-del" onClick={() => removeDoc(doc)}>Delete</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ---- Due Diligence Tab: 13 categories, checklist per deal ----
+function ddItemComplete(rec) {
+  return rec && rec.status === 'Complete';
+}
+
+function DueDiligenceTab({ dd, setDdItem }) {
+  const [activeCat, setActiveCat] = useState(DD_CATEGORIES[0].key);
+
+  // Progress per category + overall.
+  const catProgress = DD_CATEGORIES.map((cat) => {
+    const total = cat.items.length;
+    let done = 0, risks = 0;
+    cat.items.forEach((_, i) => {
+      const rec = dd[ddItemId(cat.key, i)];
+      if (ddItemComplete(rec)) done++;
+      if (rec && (rec.risk === 'High' || rec.risk === 'Medium')) risks++;
+    });
+    return { key: cat.key, label: cat.label, total, done, risks, pct: total ? done / total : 0 };
+  });
+  const grandTotal = catProgress.reduce((s, c) => s + c.total, 0);
+  const grandDone = catProgress.reduce((s, c) => s + c.done, 0);
+  const grandRisks = catProgress.reduce((s, c) => s + c.risks, 0);
+  const overallPct = grandTotal ? grandDone / grandTotal : 0;
+
+  const cat = DD_CATEGORIES.find((c) => c.key === activeCat);
+
+  return (
+    <>
+      <section className="panel">
+        <h2>Due Diligence — Overview</h2>
+        <div className="dd-overall">
+          <div className="dd-overall-stat">
+            <span className="dd-big">{Math.round(overallPct * 100)}%</span>
+            <span className="dd-small">{grandDone} of {grandTotal} items complete</span>
+          </div>
+          <div className="dd-overall-bar">
+            <div className="dd-bar-fill" style={{ width: `${overallPct * 100}%` }} />
+          </div>
+          {grandRisks > 0 && <div className="dd-risk-flag">{grandRisks} item{grandRisks > 1 ? 's' : ''} flagged Medium/High risk</div>}
+        </div>
+
+        <div className="dd-recap">
+          {catProgress.map((c) => (
+            <button
+              key={c.key}
+              className={`dd-recap-card ${activeCat === c.key ? 'active' : ''}`}
+              onClick={() => setActiveCat(c.key)}
+            >
+              <div className="dd-recap-top">
+                <span className="dd-recap-label">{c.label}</span>
+                {c.risks > 0 && <span className="dd-recap-risk">{c.risks}</span>}
+              </div>
+              <div className="dd-recap-count">{c.done}/{c.total}</div>
+              <div className="dd-recap-bar"><div className="dd-bar-fill" style={{ width: `${c.pct * 100}%` }} /></div>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="dd-cat-head">
+          <h2 style={{ margin: 0 }}>{cat.label}</h2>
+          <select className="dd-cat-select" value={activeCat} onChange={(e) => setActiveCat(e.target.value)}>
+            {DD_CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </select>
+        </div>
+
+        <div className="dd-scroll">
+          <table className="dd-table">
+            <thead>
+              <tr>
+                <th className="dd-item-col">Review Item</th>
+                <th>Status</th>
+                <th>Priority</th>
+                <th>Owner</th>
+                <th>Requested</th>
+                <th>Received</th>
+                <th>Reviewed</th>
+                <th>Risk</th>
+                <th>Comments</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cat.items.map((item, i) => {
+                const id = ddItemId(cat.key, i);
+                const rec = dd[id] || {};
+                return (
+                  <tr key={id} className={ddItemComplete(rec) ? 'dd-done' : ''}>
+                    <td className="dd-item-col">{item}</td>
+                    <td>
+                      <select className="dd-select" value={rec.status || 'Not Started'} onChange={(e) => setDdItem(id, 'status', e.target.value)}>
+                        {DD_STATUSES.map((s) => <option key={s}>{s}</option>)}
+                      </select>
+                    </td>
+                    <td>
+                      <select className="dd-select" value={rec.priority || ''} onChange={(e) => setDdItem(id, 'priority', e.target.value)}>
+                        <option value="">—</option>
+                        {DD_PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+                      </select>
+                    </td>
+                    <td><input className="dd-input" value={rec.owner || ''} onChange={(e) => setDdItem(id, 'owner', e.target.value)} /></td>
+                    <td><input className="dd-input dd-date" type="date" value={rec.requested || ''} onChange={(e) => setDdItem(id, 'requested', e.target.value)} /></td>
+                    <td><input className="dd-input dd-date" type="date" value={rec.received || ''} onChange={(e) => setDdItem(id, 'received', e.target.value)} /></td>
+                    <td><input className="dd-input dd-date" type="date" value={rec.reviewed || ''} onChange={(e) => setDdItem(id, 'reviewed', e.target.value)} /></td>
+                    <td>
+                      <select className={`dd-select dd-risk-${(rec.risk || 'none').toLowerCase()}`} value={rec.risk || 'None'} onChange={(e) => setDdItem(id, 'risk', e.target.value)}>
+                        {DD_RISKS.map((r) => <option key={r}>{r}</option>)}
+                      </select>
+                    </td>
+                    <td><input className="dd-input dd-comments" value={rec.comments || ''} onChange={(e) => setDdItem(id, 'comments', e.target.value)} /></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="explainer" style={{ marginTop: 12 }}>
+          Due diligence saves with the deal — use “Save Deal” to persist. {cat.items.length} items in {cat.label}.
+        </p>
+      </section>
+    </>
+  );
+}
+
+// ---- Property Data Tab: per-property information ----
+function PropertyTab({ deal, set }) {
+  return (
+    <section className="panel">
+      <h2>Property Data</h2>
+      <p className="explainer">
+        Per-property information — performance, management, tenants, and lease details.
+        This section is being built out. Tell me which fields to add next.
+      </p>
+    </section>
+  );
+}
+
 function PipelineTab({ pipeline, loading, currentDealId, onOpen, onStatus, onDelete, onNew, onRefresh }) {
   const usd0 = (n) =>
     n == null || isNaN(n) ? '—'
