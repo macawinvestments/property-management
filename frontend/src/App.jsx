@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api, getPassword, setPassword, clearPassword } from './api.js';
 import { DD_CATEGORIES, DD_STATUSES, DD_PRIORITIES, DD_RISKS, ddItemId } from './dueDiligence.js';
+import AddressAutocomplete from './AddressAutocomplete.jsx';
 
 const commas = (n) =>
   n == null || n === '' || isNaN(n) ? '' : Number(n).toLocaleString('en-US');
@@ -81,6 +82,9 @@ function DealApp({ onLock }) {
   const [deal, setDeal] = useState({
     name: '',
     address: '',
+    placeId: '',      // Google Places unique id for the selected address
+    lat: null,        // coordinates from the selected address
+    lng: null,
     squareFootage: '',
     askingPrice: '',
     offerPct: '',
@@ -635,11 +639,13 @@ function DealApp({ onLock }) {
           </Field>
 
           <Field label="Address">
-            <input
-              className="text"
+            <AddressAutocomplete
               value={deal.address}
-              onChange={(e) => set('address', e.target.value)}
-              placeholder="e.g. 123 Main St, City, ST"
+              onChange={(v) => set('address', v)}
+              onSelect={({ address, placeId, lat, lng }) =>
+                setDeal((d) => ({ ...d, address, placeId, lat, lng }))
+              }
+              placeholder="Start typing an address…"
             />
           </Field>
 
