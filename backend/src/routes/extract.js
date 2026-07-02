@@ -75,7 +75,7 @@ extractRouter.post('/:dealId', async (req, res) => {
 
     // Fetch the file bytes from R2 (via a signed URL) and base64-encode.
     const url = await signedDownloadUrl(doc.storage_key, doc.filename, 120);
-    const fileResp = await fetch(url, { signal: AbortSignal.timeout(30000) });
+    const fileResp = await fetch(url, { signal: AbortSignal.timeout(60000) });
     if (!fileResp.ok) throw new Error(`Could not fetch document (${fileResp.status})`);
     const buf = Buffer.from(await fileResp.arrayBuffer());
     const base64 = buf.toString('base64');
@@ -84,8 +84,11 @@ extractRouter.post('/:dealId', async (req, res) => {
     const schemaRes = await query('SELECT field_key, label, field_type, extract FROM schema_fields ORDER BY sort_order, id');
     const prompt = buildPrompt(schemaRes.rows);
 
-    // Call Claude with the PDF + extraction instructions.
-    const message = await anthropic.messages.create({
+    // Call Claude with the PDF + extraction instructions. Use STREAMING —
+    // large PDFs take long enough that a non-streamed request can have its
+    // connection dropped ("premature close"), especially behind a host like
+    // Railway. Streaming keeps the connection alive and assembles the text.
+    const stream = await anthropic.messages.stream({
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
       messages: [
@@ -98,6 +101,7 @@ extractRouter.post('/:dealId', async (req, res) => {
         },
       ],
     });
+    const message = await stream.finalMessage();
 
     // Parse the JSON response (strip any accidental fences).
     const text = (message.content || [])
