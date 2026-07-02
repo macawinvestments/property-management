@@ -88,7 +88,7 @@ function DealApp({ onLock }) {
     propertyData: {}, // address-pulled data (flood zone, demographics, parcel…)
     squareFootage: '',
     askingPrice: '',
-    offerPct: '',
+    offerAmount: '',
     capitalizedRehab: '',
     nonCapitalizedRehab: '',
     occupancyPct: '',
@@ -205,7 +205,16 @@ function DealApp({ onLock }) {
     try {
       const row = await api.getDeal(id);
       const d = row.data || {};
-      if (d.deal) setDeal(d.deal);
+      if (d.deal) {
+        const dealData = { ...d.deal };
+        // Migrate old deals that stored offer as a % of asking → offer amount.
+        if (dealData.offerAmount == null && dealData.offerPct != null && dealData.askingPrice != null) {
+          dealData.offerAmount = String(
+            Math.round((Number(dealData.askingPrice) || 0) * ((Number(dealData.offerPct) || 0) / 100))
+          );
+        }
+        setDeal(dealData);
+      }
       if (d.settings) setSettings(d.settings);
       if (d.proforma) setProforma(d.proforma);
       setDd(d.dd || {});
@@ -259,8 +268,9 @@ function DealApp({ onLock }) {
 
   // Automatic calculations
   // Purchase price = asking × offer%
-  const purchasePrice =
-    (Number(deal.askingPrice) || 0) * ((Number(deal.offerPct) || 0) / 100);
+  const purchasePrice = Number(deal.offerAmount) || 0;
+  const offerPctOfAsking =
+    Number(deal.askingPrice) > 0 ? (purchasePrice / Number(deal.askingPrice)) * 100 : null;
   // Total to be financed = purchase price + capitalized rehab
   const totalToFinance = purchasePrice + (Number(deal.capitalizedRehab) || 0);
 
@@ -658,11 +668,15 @@ function DealApp({ onLock }) {
             <Num value={deal.askingPrice} onChange={(v) => set('askingPrice', v)} prefix="$" />
           </Field>
 
-          <Field label="Offer %">
-            <Num value={deal.offerPct} onChange={(v) => set('offerPct', v)} suffix="%" />
+          <Field label="Offer amount" note="What you intend to pay">
+            <Num value={deal.offerAmount} onChange={(v) => set('offerAmount', v)} prefix="$" />
           </Field>
 
-          <Field label="Purchase price" note="Asking × offer %">
+          <Field label="Offer % of asking" note="Offer ÷ asking">
+            <Num value={offerPctOfAsking == null ? '' : offerPctOfAsking.toFixed(1)} suffix="%" calc />
+          </Field>
+
+          <Field label="Purchase price" note="= offer amount">
             <Num value={purchasePrice} prefix="$" calc />
           </Field>
 
