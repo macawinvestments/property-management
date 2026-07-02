@@ -4,6 +4,7 @@ import { config } from './config.js';
 import { query } from './db/pool.js';
 import { dealsRouter } from './routes/deals.js';
 import { documentsRouter } from './routes/documents.js';
+import { enrichRouter } from './routes/enrich.js';
 import { requirePassword } from './middleware/auth.js';
 
 const app = express();
@@ -28,6 +29,9 @@ app.use('/api/deals', requirePassword, dealsRouter);
 
 // Documents routes also require the password.
 app.use('/api/documents', requirePassword, documentsRouter);
+
+// Property-data enrichment (FEMA flood, later Census/Regrid). Password-protected.
+app.use('/api/enrich', requirePassword, enrichRouter);
 
 // Health check — proves the server is up and tests the actual DB connection.
 app.get('/api/health', async (_req, res) => {

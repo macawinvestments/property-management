@@ -16,4 +16,6 @@ export const config = {
       return `https://${this.accountId}.r2.cloudflarestorage.com`;
     },
   },
+  censusApiKey: process.env.CENSUS_API_KEY || '',
+  regridToken: process.env.REGRID_TOKEN || '',
 };

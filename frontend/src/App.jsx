@@ -85,6 +85,7 @@ function DealApp({ onLock }) {
     placeId: '',      // Google Places unique id for the selected address
     lat: null,        // coordinates from the selected address
     lng: null,
+    propertyData: {}, // address-pulled data (flood zone, demographics, parcel…)
     squareFootage: '',
     askingPrice: '',
     offerPct: '',
@@ -875,7 +876,7 @@ function DealApp({ onLock }) {
       )}
 
       {tab === 'property' && (
-        <PropertyTab deal={deal} set={set} />
+        <PropertyTab deal={deal} setDeal={setDeal} />
       )}
 
       {tab === 'dd' && (
@@ -1174,15 +1175,199 @@ function DueDiligenceTab({ dd, setDdItem }) {
 }
 
 // ---- Property Data Tab: per-property information ----
-function PropertyTab({ deal, set }) {
+function PropertyTab({ deal, setDeal }) {
+  const [loading, setLoading] = useState('');
+  const [error, setError] = useState('');
+  const pd = deal.propertyData || {};
+  const hasCoords = deal.lat != null && deal.lng != null;
+
+  async function pullFlood() {
+    if (!hasCoords) return;
+    setLoading('flood');
+    setError('');
+    try {
+      const res = await api.getFloodZone(deal.lat, deal.lng);
+      setDeal((d) => ({ ...d, propertyData: { ...(d.propertyData || {}), flood: res } }));
+    } catch (e) {
+      setError(e.message || 'Flood lookup failed');
+    } finally {
+      setLoading('');
+    }
+  }
+
+  async function pullDemographics() {
+    if (!hasCoords) return;
+    setLoading('demo');
+    setError('');
+    try {
+      const res = await api.getDemographics(deal.lat, deal.lng);
+      setDeal((d) => ({ ...d, propertyData: { ...(d.propertyData || {}), demographics: res } }));
+    } catch (e) {
+      setError(e.message || 'Demographics lookup failed');
+    } finally {
+      setLoading('');
+    }
+  }
+
+  async function pullParcel() {
+    if (!hasCoords) return;
+    setLoading('parcel');
+    setError('');
+    try {
+      const res = await api.getParcel(deal.lat, deal.lng);
+      setDeal((d) => ({ ...d, propertyData: { ...(d.propertyData || {}), parcel: res } }));
+    } catch (e) {
+      setError(e.message || 'Parcel lookup failed');
+    } finally {
+      setLoading('');
+    }
+  }
+
+  const flood = pd.flood;
+  const demo = pd.demographics;
+  const parcel = pd.parcel;
+  const fmtNum = (v) => (v == null ? '—' : Number(v).toLocaleString('en-US'));
+  const fmtUsd = (v) => (v == null ? '—' : '$' + Number(v).toLocaleString('en-US'));
+
   return (
-    <section className="panel">
-      <h2>Property Data</h2>
-      <p className="explainer">
-        Per-property information — performance, management, tenants, and lease details.
-        This section is being built out. Tell me which fields to add next.
-      </p>
-    </section>
+    <>
+      <section className="panel">
+        <h2>Property Data</h2>
+        {!deal.address && (
+          <p className="explainer">Select an address on the Deal Inputs tab first — the property data below is pulled from that address.</p>
+        )}
+        {deal.address && (
+          <div className="pd-address">
+            <span className="pd-address-label">Address in use</span>
+            <span className="pd-address-value">{deal.address}</span>
+            {hasCoords && <span className="pd-coords">{Number(deal.lat).toFixed(5)}, {Number(deal.lng).toFixed(5)}</span>}
+          </div>
+        )}
+        {deal.address && !hasCoords && (
+          <p className="explainer">This address has no stored coordinates. Re-select it from the Google dropdown on Deal Inputs so data can be pulled.</p>
+        )}
+        {error && <div className="save-error" style={{ marginTop: 14 }}>{error}</div>}
+      </section>
+
+      <section className="panel">
+        <h2 className="with-toggle">
+          Parcel &amp; Zoning
+          <button className="settings-btn" disabled={!hasCoords || loading === 'parcel'} onClick={pullParcel}>
+            {loading === 'parcel' ? 'Pulling…' : parcel ? 'Refresh' : 'Pull parcel data'}
+          </button>
+        </h2>
+
+        {!parcel && <p className="explainer">Pull parcel, zoning, assessment, and ownership data for this property (source: Regrid).</p>}
+
+        {parcel && parcel.found && (
+          <>
+            <div className="pd-subhead">Parcel</div>
+            <div className="pd-fields">
+              <div className="pd-field"><span className="pd-field-label">APN / Parcel #</span><span className="pd-field-value">{parcel.apn || '—'}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Use</span><span className="pd-field-value">{parcel.useDesc || '—'}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Lot Size</span><span className="pd-field-value">{parcel.lotAcres == null ? '—' : `${parcel.lotAcres.toFixed(3)} ac`}{parcel.lotSqft ? ` · ${fmtNum(parcel.lotSqft)} sf` : ''}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Year Built</span><span className="pd-field-value">{parcel.yearBuilt || '—'}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Building Area</span><span className="pd-field-value">{parcel.buildingSqft ? `${fmtNum(parcel.buildingSqft)} sf` : '—'}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Building Footprint</span><span className="pd-field-value">{parcel.buildingFootprintSqft ? `${fmtNum(parcel.buildingFootprintSqft)} sf` : '—'}</span></div>
+            </div>
+
+            <div className="pd-subhead">Zoning</div>
+            <div className="pd-fields">
+              <div className="pd-field"><span className="pd-field-label">Zoning Code</span><span className="pd-field-value pd-flag-ok">{parcel.zoning || '—'}</span></div>
+              <div className="pd-field pd-field-wide"><span className="pd-field-label">Description</span><span className="pd-field-value">{parcel.zoningDescription || '—'}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Max Height</span><span className="pd-field-value">{parcel.maxHeightFt == null ? '—' : `${parcel.maxHeightFt} ft`}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Max FAR</span><span className="pd-field-value">{parcel.maxFar == null ? '—' : parcel.maxFar}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Max Coverage</span><span className="pd-field-value">{parcel.maxCoveragePct == null ? '—' : `${parcel.maxCoveragePct}%`}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Min Lot Area</span><span className="pd-field-value">{parcel.minLotAreaSqft == null ? '—' : `${fmtNum(parcel.minLotAreaSqft)} sf`}</span></div>
+            </div>
+
+            <div className="pd-subhead">Assessment</div>
+            <div className="pd-fields">
+              <div className="pd-field"><span className="pd-field-label">Total Assessed</span><span className="pd-field-value">{fmtUsd(parcel.assessedTotal)}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Land Value</span><span className="pd-field-value">{fmtUsd(parcel.landValue)}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Improvement Value</span><span className="pd-field-value">{fmtUsd(parcel.improvementValue)}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Last Sale</span><span className="pd-field-value">{parcel.lastSalePrice ? fmtUsd(parcel.lastSalePrice) : '—'}{parcel.lastSaleDate ? ` · ${parcel.lastSaleDate}` : ''}</span></div>
+            </div>
+
+            <div className="pd-subhead">Ownership</div>
+            <div className="pd-fields">
+              <div className="pd-field"><span className="pd-field-label">Owner</span><span className="pd-field-value">{parcel.owner || '—'}</span></div>
+              {parcel.owner2 && <div className="pd-field"><span className="pd-field-label">Co-Owner</span><span className="pd-field-value">{parcel.owner2}</span></div>}
+              <div className="pd-field pd-field-wide"><span className="pd-field-label">Owner Mailing Address</span><span className="pd-field-value">{parcel.ownerMailingAddress || '—'}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Opportunity Zone</span><span className="pd-field-value">{parcel.opportunityZone || '—'}</span></div>
+              <div className="pd-field"><span className="pd-field-label">FEMA Risk Rating</span><span className="pd-field-value">{parcel.femaRiskRating || '—'}</span></div>
+            </div>
+          </>
+        )}
+
+        {parcel && !parcel.found && (
+          <p className="explainer">{parcel.message || 'No parcel found at this location.'}</p>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2 className="with-toggle">
+          Flood Zone
+          <button className="settings-btn" disabled={!hasCoords || loading === 'flood'} onClick={pullFlood}>
+            {loading === 'flood' ? 'Pulling…' : flood ? 'Refresh' : 'Pull flood zone'}
+          </button>
+        </h2>
+
+        {!flood && <p className="explainer">Pull the FEMA flood-zone designation for this location (source: FEMA National Flood Hazard Layer).</p>}
+
+        {flood && flood.found && (
+          <div className="pd-fields">
+            <div className="pd-field">
+              <span className="pd-field-label">FEMA Flood Zone</span>
+              <span className={`pd-field-value ${flood.sfha ? 'pd-flag-high' : 'pd-flag-ok'}`}>{flood.zone || '—'}</span>
+            </div>
+            {flood.subtype && (
+              <div className="pd-field"><span className="pd-field-label">Subtype</span><span className="pd-field-value">{flood.subtype}</span></div>
+            )}
+            <div className="pd-field">
+              <span className="pd-field-label">Special Flood Hazard Area</span>
+              <span className={`pd-field-value ${flood.sfha ? 'pd-flag-high' : 'pd-flag-ok'}`}>{flood.sfha == null ? '—' : flood.sfha ? 'Yes' : 'No'}</span>
+            </div>
+            {flood.meaning && (
+              <div className="pd-field pd-field-wide"><span className="pd-field-label">Assessment</span><span className="pd-field-value">{flood.meaning}</span></div>
+            )}
+          </div>
+        )}
+
+        {flood && !flood.found && (
+          <p className="explainer">{flood.message || 'No FEMA-mapped flood zone found at this location.'}</p>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2 className="with-toggle">
+          Area Demographics
+          <button className="settings-btn" disabled={!hasCoords || loading === 'demo'} onClick={pullDemographics}>
+            {loading === 'demo' ? 'Pulling…' : demo ? 'Refresh' : 'Pull demographics'}
+          </button>
+        </h2>
+
+        {!demo && <p className="explainer">Pull Census ACS demographics for the surrounding area (source: US Census Bureau, ACS 5-year estimates, tract level).</p>}
+
+        {demo && demo.found && (
+          <>
+            <div className="pd-fields">
+              <div className="pd-field"><span className="pd-field-label">Median Household Income</span><span className="pd-field-value pd-flag-ok">{fmtUsd(demo.medianHouseholdIncome)}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Population (tract)</span><span className="pd-field-value">{fmtNum(demo.population)}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Population Density</span><span className="pd-field-value">{demo.densityPerSqMi == null ? '—' : fmtNum(demo.densityPerSqMi) + ' /sq mi'}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Median Age</span><span className="pd-field-value">{demo.medianAge == null ? '—' : demo.medianAge}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Households</span><span className="pd-field-value">{fmtNum(demo.households)}</span></div>
+              <div className="pd-field"><span className="pd-field-label">Housing Units</span><span className="pd-field-value">{fmtNum(demo.housingUnits)}</span></div>
+            </div>
+            {demo.tractName && <p className="explainer" style={{ marginTop: 12 }}>Census tract: {demo.tractName}</p>}
+          </>
+        )}
+
+        {demo && !demo.found && (
+          <p className="explainer">{demo.message || 'No Census data found for this location.'}</p>
+        )}
+      </section>
+    </>
   );
 }
 

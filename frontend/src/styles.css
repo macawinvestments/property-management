@@ -405,3 +405,25 @@ body {
 .pac-matched { color: var(--gold-soft); }
 .pac-icon { display: none; }
 .pac-logo::after { filter: invert(0.8) sepia(1) saturate(0.3); opacity: 0.5; }
+
+/* Property Data */
+.pd-address { display: flex; flex-direction: column; gap: 2px; background: var(--ink); border: 1px solid var(--ink-line); border-radius: 8px; padding: 12px 14px; }
+.pd-address-label { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.pd-address-value { font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: var(--parchment); }
+.pd-coords { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.pd-fields { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 20px; }
+@media (max-width: 640px) { .pd-fields { grid-template-columns: 1fr; } }
+.pd-field { display: flex; flex-direction: column; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--ink-line); }
+.pd-field-wide { grid-column: 1 / -1; }
+.pd-field-label { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.pd-field-value { font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: var(--parchment); }
+.pd-flag-high { color: #e0a878; }
+.pd-flag-ok { color: var(--gold-soft); }
+
+/* Property Data sub-headings (Parcel/Zoning/Assessment/Ownership groups) */
+.pd-subhead {
+  font-family: 'Inter', sans-serif; font-weight: 600; font-size: 11px;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold-soft);
+  margin: 20px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--gold);
+}
+.pd-subhead:first-child { margin-top: 0; }

@@ -110,4 +110,26 @@ export const api = {
 
   deleteDocument: (docId) =>
     fetch(`${API}/api/documents/file/${docId}`, { method: 'DELETE', headers: authHeaders() }).then(handle),
+
+  // ---- Property-data enrichment ----
+  getFloodZone: (lat, lng) =>
+    fetch(`${API}/api/enrich/flood`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ lat, lng }),
+    }).then(handle),
+
+  getDemographics: (lat, lng) =>
+    fetch(`${API}/api/enrich/demographics`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ lat, lng }),
+    }).then(handle),
+
+  getParcel: (lat, lng) =>
+    fetch(`${API}/api/enrich/parcel`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ lat, lng }),
+    }).then(handle),
 };
