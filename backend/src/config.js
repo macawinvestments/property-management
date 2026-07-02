@@ -18,4 +18,5 @@ export const config = {
   },
   censusApiKey: process.env.CENSUS_API_KEY || '',
   regridToken: process.env.REGRID_TOKEN || '',
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
 };

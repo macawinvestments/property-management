@@ -427,3 +427,17 @@ body {
   margin: 20px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--gold);
 }
 .pd-subhead:first-child { margin-top: 0; }
+
+/* Overview tab — document intake + extraction review */
+.ov-intake { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.ov-fields { display: flex; flex-direction: column; gap: 8px; }
+.ov-field { display: flex; gap: 12px; align-items: flex-start; background: var(--ink); border: 1px solid var(--ink-line); border-radius: 6px; padding: 12px 14px; }
+.ov-check { padding-top: 2px; }
+.ov-check input { width: 16px; height: 16px; accent-color: var(--gold); cursor: pointer; }
+.ov-field-body { flex: 1; min-width: 0; }
+.ov-field-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.ov-field-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); text-transform: none; }
+.ov-field-value { font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: var(--gold-soft); text-align: right; word-break: break-word; }
+.ov-field-source { display: flex; gap: 8px; align-items: baseline; margin-top: 5px; }
+.ov-page { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink); background: var(--gold); border-radius: 3px; padding: 1px 6px; flex-shrink: 0; }
+.ov-snippet { font-size: 11px; color: var(--muted); font-style: italic; word-break: break-word; }

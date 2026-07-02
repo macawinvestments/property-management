@@ -5,6 +5,7 @@ import { query } from './db/pool.js';
 import { dealsRouter } from './routes/deals.js';
 import { documentsRouter } from './routes/documents.js';
 import { enrichRouter } from './routes/enrich.js';
+import { extractRouter } from './routes/extract.js';
 import { requirePassword } from './middleware/auth.js';
 
 const app = express();
@@ -33,6 +34,9 @@ app.use('/api/documents', requirePassword, documentsRouter);
 // Property-data enrichment (FEMA flood, later Census/Regrid). Password-protected.
 app.use('/api/enrich', requirePassword, enrichRouter);
 
+// Document extraction (OM → fields via Claude). Password-protected.
+app.use('/api/extract', requirePassword, extractRouter);
+
 // Health check — proves the server is up and tests the actual DB connection.
 app.get('/api/health', async (_req, res) => {
   let dbConnected = false;
@@ -49,6 +53,7 @@ app.get('/api/health', async (_req, res) => {
     dbConfigured: Boolean(config.databaseUrl),
     dbConnected,
     r2Configured: Boolean(config.r2.accountId && config.r2.accessKeyId && config.r2.secretAccessKey),
+    extractionConfigured: Boolean(config.anthropicApiKey),
   });
 });
 

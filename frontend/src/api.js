@@ -132,4 +132,17 @@ export const api = {
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ lat, lng }),
     }).then(handle),
+
+  // ---- Extraction ----
+  getSchema: () => fetch(`${API}/api/extract/schema`, { headers: authHeaders() }).then(handle),
+
+  extractDocument: (dealId, documentId) =>
+    fetch(`${API}/api/extract/${dealId}`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ documentId }),
+    }).then(handle),
+
+  extractionHistory: (dealId) =>
+    fetch(`${API}/api/extract/${dealId}/history`, { headers: authHeaders() }).then(handle),
 };

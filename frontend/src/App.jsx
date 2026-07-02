@@ -628,12 +628,21 @@ function DealApp({ onLock }) {
       )}
 
       <div className="tabs">
+        <button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}>Overview</button>
         <button className={tab === 'deal' ? 'active' : ''} onClick={() => setTab('deal')}>Deal Inputs</button>
         <button className={tab === 'proforma' ? 'active' : ''} onClick={() => setTab('proforma')}>Proforma</button>
         <button className={tab === 'property' ? 'active' : ''} onClick={() => setTab('property')}>Property Data</button>
         <button className={tab === 'dd' ? 'active' : ''} onClick={() => setTab('dd')}>Due Diligence</button>
         <button className={tab === 'documents' ? 'active' : ''} onClick={() => setTab('documents')}>Documents</button>
       </div>
+
+      {tab === 'overview' && (
+        <OverviewTab
+          currentDealId={currentDealId}
+          deal={deal}
+          setDeal={setDeal}
+        />
+      )}
 
       {tab === 'deal' && (
       <>
@@ -1184,6 +1193,218 @@ function DueDiligenceTab({ dd, setDdItem }) {
           Due diligence saves with the deal — use “Save Deal” to persist. {cat.items.length} items in {cat.label}.
         </p>
       </section>
+    </>
+  );
+}
+
+// ---- Overview Tab: upload OM → extract → review → apply ----
+// Maps extracted schema keys onto the deal's model fields for "apply".
+const OVERVIEW_TO_DEAL = {
+  property_name: 'name',
+  property_address: 'address',
+  building_size_sf: 'squareFootage',
+  asking_price: 'askingPrice',
+  occupancy_pct: 'occupancyPct',
+};
+
+function OverviewTab({ currentDealId, deal, setDeal }) {
+  const [docs, setDocs] = useState([]);
+  const [selectedDoc, setSelectedDoc] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [result, setResult] = useState(null); // { knownFields, extraFacts, sourceName }
+  const [applied, setApplied] = useState({}); // field_key -> true (accepted)
+  const [error, setError] = useState('');
+
+  async function refreshDocs() {
+    if (!currentDealId) return;
+    try {
+      const list = await api.listDocuments(currentDealId);
+      setDocs(list);
+      const pdfs = list.filter((d) => (d.mime_type || '').includes('pdf') || d.filename.toLowerCase().endsWith('.pdf'));
+      if (pdfs.length && !selectedDoc) setSelectedDoc(String(pdfs[0].id));
+    } catch (e) { /* ignore */ }
+  }
+
+  // Load the most recent stored extraction so the review panel survives tab
+  // switches and reopening the deal (it lives in the extractions table).
+  async function loadLastExtraction() {
+    if (!currentDealId) return;
+    try {
+      const hist = await api.extractionHistory(currentDealId);
+      if (hist && hist.length) {
+        const last = hist[0];
+        const res = {
+          sourceName: last.source_name,
+          knownFields: last.known_fields || {},
+          extraFacts: last.extra_facts || [],
+        };
+        setResult(res);
+        const pre = {};
+        Object.keys(res.knownFields).forEach((k) => { pre[k] = true; });
+        setApplied(pre);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  useEffect(() => {
+    if (currentDealId) { refreshDocs(); loadLastExtraction(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDealId]);
+
+  async function handleUpload(files) {
+    if (!files.length) return;
+    setUploading(true); setError('');
+    try {
+      const saved = await api.uploadDocuments(currentDealId, 'others', files);
+      await refreshDocs();
+      if (saved && saved[0]) setSelectedDoc(String(saved[0].id));
+    } catch (e) {
+      setError(e.message || 'Upload failed');
+    } finally { setUploading(false); }
+  }
+
+  async function runExtraction() {
+    if (!selectedDoc) return;
+    setExtracting(true); setError(''); setResult(null); setApplied({});
+    try {
+      const res = await api.extractDocument(currentDealId, Number(selectedDoc));
+      setResult(res);
+      // Pre-check all found known fields for applying.
+      const pre = {};
+      Object.keys(res.knownFields || {}).forEach((k) => { pre[k] = true; });
+      setApplied(pre);
+    } catch (e) {
+      setError(e.message || 'Extraction failed');
+    } finally { setExtracting(false); }
+  }
+
+  function applyToDeal() {
+    if (!result) return;
+    const updates = {};
+    Object.entries(result.knownFields || {}).forEach(([key, info]) => {
+      if (!applied[key]) return;
+      const dealKey = OVERVIEW_TO_DEAL[key];
+      if (dealKey && info && info.value != null) {
+        updates[dealKey] = String(info.value);
+      }
+    });
+    if (Object.keys(updates).length) {
+      setDeal((d) => ({ ...d, ...updates }));
+    }
+  }
+
+  const pdfs = docs.filter((d) => (d.mime_type || '').includes('pdf') || d.filename.toLowerCase().endsWith('.pdf'));
+
+  if (!currentDealId) {
+    return (
+      <section className="panel">
+        <h2>Property Overview</h2>
+        <p className="explainer">Save this deal first (use “Save Deal”), then upload an offering memorandum here to auto-extract its data.</p>
+      </section>
+    );
+  }
+
+  return (
+    <>
+      <section className="panel">
+        <h2>Property Overview — Document Intake</h2>
+        <p className="explainer">
+          Upload an offering memorandum or listing PDF. The extractor reads it and proposes values with the page they came from.
+          Review, then apply the ones you trust to the deal. Stated facts stay separate from your own underwriting.
+        </p>
+        {error && <div className="save-error">{error}</div>}
+
+        <div className="ov-intake">
+          <label className="docs-upload-btn">
+            {uploading ? 'Uploading…' : '+ Upload PDF'}
+            <input type="file" accept="application/pdf" multiple style={{ display: 'none' }}
+              disabled={uploading}
+              onChange={(e) => { handleUpload(Array.from(e.target.files)); e.target.value = ''; }} />
+          </label>
+
+          {pdfs.length > 0 && (
+            <>
+              <select className="dd-cat-select" value={selectedDoc} onChange={(e) => setSelectedDoc(e.target.value)}>
+                {pdfs.map((d) => <option key={d.id} value={d.id}>{d.filename}</option>)}
+              </select>
+              <button className="save-btn" disabled={extracting || !selectedDoc} onClick={runExtraction}>
+                {extracting ? 'Extracting…' : 'Extract data'}
+              </button>
+            </>
+          )}
+        </div>
+        {pdfs.length === 0 && <p className="explainer" style={{ marginTop: 12 }}>No PDFs yet — upload one to begin.</p>}
+        {extracting && <p className="explainer" style={{ marginTop: 12 }}>Reading the document… this can take 15–30 seconds.</p>}
+      </section>
+
+      {result && (
+        <>
+          <section className="panel">
+            <h2 className="with-toggle">
+              Extracted Fields
+              <button className="save-btn" onClick={applyToDeal}>Apply selected to deal</button>
+            </h2>
+            <p className="explainer">From “{result.sourceName}”. Check the values to apply; each shows the page it came from.</p>
+
+            {Object.keys(result.knownFields || {}).length === 0 && (
+              <p className="explainer">No known fields were confidently found in this document.</p>
+            )}
+
+            <div className="ov-fields">
+              {Object.entries(result.knownFields || {}).map(([key, info]) => (
+                <div key={key} className="ov-field">
+                  <label className="ov-check">
+                    <input type="checkbox" checked={!!applied[key]} onChange={(e) => setApplied((a) => ({ ...a, [key]: e.target.checked }))} />
+                  </label>
+                  <div className="ov-field-body">
+                    <div className="ov-field-top">
+                      <span className="ov-field-label">{key}</span>
+                      <span className="ov-field-value">{String(info.value)}</span>
+                    </div>
+                    <div className="ov-field-source">
+                      {info.page != null && <span className="ov-page">p.{info.page}</span>}
+                      {info.source_text && <span className="ov-snippet">“{info.source_text}”</span>}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="explainer" style={{ marginTop: 12 }}>
+              Applying writes these into your Deal Inputs as starting values (you can still override them there).
+              Only the model-mapped facts (name, address, size, asking price, occupancy) push into the deal today — the rest are kept here as stated facts.
+            </p>
+          </section>
+
+          <section className="panel">
+            <h2>Additional Facts Found</h2>
+            {(!result.extraFacts || result.extraFacts.length === 0) && (
+              <p className="explainer">No additional facts beyond the known fields.</p>
+            )}
+            {result.extraFacts && result.extraFacts.length > 0 && (
+              <div className="ov-fields">
+                {result.extraFacts.map((f, i) => (
+                  <div key={i} className="ov-field">
+                    <div className="ov-field-body">
+                      <div className="ov-field-top">
+                        <span className="ov-field-label">{f.label}</span>
+                        <span className="ov-field-value">{String(f.value)}</span>
+                      </div>
+                      <div className="ov-field-source">
+                        {f.page != null && <span className="ov-page">p.{f.page}</span>}
+                        {f.source_text && <span className="ov-snippet">“{f.source_text}”</span>}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="explainer" style={{ marginTop: 12 }}>
+              These are useful facts the extractor found that aren’t formal fields yet — captured so nothing’s lost.
+            </p>
+          </section>
+        </>
+      )}
     </>
   );
 }
