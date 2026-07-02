@@ -1268,15 +1268,33 @@ function OverviewTab({ currentDealId, deal, setDeal }) {
     if (!selectedDoc) return;
     setExtracting(true); setError(''); setResult(null); setApplied({});
     try {
-      const res = await api.extractDocument(currentDealId, Number(selectedDoc));
-      setResult(res);
-      // Pre-check all found known fields for applying.
-      const pre = {};
-      Object.keys(res.knownFields || {}).forEach((k) => { pre[k] = true; });
-      setApplied(pre);
+      const start = await api.extractDocument(currentDealId, Number(selectedDoc));
+      const extractionId = start.extractionId;
+      // Poll for completion — the backend does the slow Claude call in the
+      // background, so we just check status every few seconds.
+      const poll = async () => {
+        const s = await api.extractionStatus(extractionId);
+        if (s.status === 'done') {
+          const res = { sourceName: s.sourceName, knownFields: s.knownFields || {}, extraFacts: s.extraFacts || [] };
+          setResult(res);
+          const pre = {};
+          Object.keys(res.knownFields).forEach((k) => { pre[k] = true; });
+          setApplied(pre);
+          setExtracting(false);
+          return;
+        }
+        if (s.status === 'error') {
+          setError(s.errorDetail || 'Extraction failed');
+          setExtracting(false);
+          return;
+        }
+        setTimeout(poll, 3000); // still pending — check again
+      };
+      setTimeout(poll, 3000);
     } catch (e) {
       setError(e.message || 'Extraction failed');
-    } finally { setExtracting(false); }
+      setExtracting(false);
+    }
   }
 
   function applyToDeal() {
@@ -1335,7 +1353,7 @@ function OverviewTab({ currentDealId, deal, setDeal }) {
           )}
         </div>
         {pdfs.length === 0 && <p className="explainer" style={{ marginTop: 12 }}>No PDFs yet — upload one to begin.</p>}
-        {extracting && <p className="explainer" style={{ marginTop: 12 }}>Reading the document… this can take 15–30 seconds.</p>}
+        {extracting && <p className="explainer" style={{ marginTop: 12 }}>Reading the document in the background… this can take 30–90 seconds for a large OM. You can leave this tab; the result is saved when it finishes.</p>}
       </section>
 
       {result && (

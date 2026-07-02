@@ -136,12 +136,17 @@ export const api = {
   // ---- Extraction ----
   getSchema: () => fetch(`${API}/api/extract/schema`, { headers: authHeaders() }).then(handle),
 
+  // Starts extraction; returns { extractionId, status: 'pending' } immediately.
   extractDocument: (dealId, documentId) =>
     fetch(`${API}/api/extract/${dealId}`, {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ documentId }),
     }).then(handle),
+
+  // Poll for the result.
+  extractionStatus: (extractionId) =>
+    fetch(`${API}/api/extract/status/${extractionId}`, { headers: authHeaders() }).then(handle),
 
   extractionHistory: (dealId) =>
     fetch(`${API}/api/extract/${dealId}/history`, { headers: authHeaders() }).then(handle),

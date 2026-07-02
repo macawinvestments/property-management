@@ -6,7 +6,11 @@ import { signedDownloadUrl } from '../storage/r2.js';
 
 export const extractRouter = express.Router();
 
-const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
+const anthropic = new Anthropic({
+  apiKey: config.anthropicApiKey,
+  timeout: 10 * 60 * 1000, // 10 minutes — large PDFs take a while
+  maxRetries: 3,           // retry transient connection drops
+});
 
 function anthropicConfigured() {
   return Boolean(config.anthropicApiKey);
@@ -56,38 +60,20 @@ Return exactly this JSON shape:
 }`;
 }
 
-// POST /api/extract/:dealId  { documentId }  — extract from a stored R2 doc.
-extractRouter.post('/:dealId', async (req, res) => {
-  if (!anthropicConfigured()) {
-    return res.status(503).json({ error: 'Extraction not configured (missing ANTHROPIC_API_KEY)' });
-  }
-  const { dealId } = req.params;
-  const { documentId } = req.body || {};
-  if (!documentId) return res.status(400).json({ error: 'documentId is required' });
-
+// The heavy lifting: fetch PDF, call Claude, store results. Runs in the
+// BACKGROUND (not awaited by the HTTP request) so Railway's request timeout
+// can't kill it — the request already returned.
+async function runExtractionJob(extractionId, dealId, doc) {
   try {
-    // Load the document metadata.
-    const docRes = await query('SELECT * FROM documents WHERE id = $1 AND deal_id = $2', [documentId, dealId]);
-    if (!docRes.rows.length) return res.status(404).json({ error: 'Document not found for this deal' });
-    const doc = docRes.rows[0];
-    const isPdf = (doc.mime_type || '').includes('pdf') || (doc.filename || '').toLowerCase().endsWith('.pdf');
-    if (!isPdf) return res.status(400).json({ error: 'Extraction currently supports PDF documents only' });
-
-    // Fetch the file bytes from R2 (via a signed URL) and base64-encode.
     const url = await signedDownloadUrl(doc.storage_key, doc.filename, 120);
     const fileResp = await fetch(url, { signal: AbortSignal.timeout(60000) });
     if (!fileResp.ok) throw new Error(`Could not fetch document (${fileResp.status})`);
     const buf = Buffer.from(await fileResp.arrayBuffer());
     const base64 = buf.toString('base64');
 
-    // Load the schema.
     const schemaRes = await query('SELECT field_key, label, field_type, extract FROM schema_fields ORDER BY sort_order, id');
     const prompt = buildPrompt(schemaRes.rows);
 
-    // Call Claude with the PDF + extraction instructions. Use STREAMING —
-    // large PDFs take long enough that a non-streamed request can have its
-    // connection dropped ("premature close"), especially behind a host like
-    // Railway. Streaming keeps the connection alive and assembles the text.
     const stream = await anthropic.messages.stream({
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
@@ -103,7 +89,6 @@ extractRouter.post('/:dealId', async (req, res) => {
     });
     const message = await stream.finalMessage();
 
-    // Parse the JSON response (strip any accidental fences).
     const text = (message.content || [])
       .filter((b) => b.type === 'text')
       .map((b) => b.text)
@@ -112,32 +97,79 @@ extractRouter.post('/:dealId', async (req, res) => {
       .trim();
 
     let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      return res.status(502).json({ error: 'Model returned unparseable output', raw: text.slice(0, 500) });
-    }
+    try { parsed = JSON.parse(text); }
+    catch { throw new Error('Model returned unparseable output'); }
+
     const known = parsed.known_fields || {};
     const extras = Array.isArray(parsed.extra_facts) ? parsed.extra_facts : [];
 
-    // Store the extraction result (nothing lost).
-    const ins = await query(
-      `INSERT INTO extractions (deal_id, document_id, source_name, known_fields, extra_facts)
-       VALUES ($1,$2,$3,$4,$5) RETURNING id, created_at`,
-      [dealId, documentId, doc.filename, JSON.stringify(known), JSON.stringify(extras)]
+    await query(
+      `UPDATE extractions SET status='done', known_fields=$1, extra_facts=$2, error_detail=NULL WHERE id=$3`,
+      [JSON.stringify(known), JSON.stringify(extras), extractionId]
     );
+    console.log(`[extract:done] extraction ${extractionId} completed`);
+  } catch (err) {
+    console.error('[extract:job]', err.message);
+    await query(`UPDATE extractions SET status='error', error_detail=$1 WHERE id=$2`, [err.message, extractionId]);
+  }
+}
 
+// POST /api/extract/:dealId  { documentId } — START extraction. Returns
+// immediately with a pending extractionId; the work runs in the background.
+extractRouter.post('/:dealId', async (req, res) => {
+  if (!anthropicConfigured()) {
+    return res.status(503).json({ error: 'Extraction not configured (missing ANTHROPIC_API_KEY)' });
+  }
+  const { dealId } = req.params;
+  const { documentId } = req.body || {};
+  if (!documentId) return res.status(400).json({ error: 'documentId is required' });
+
+  try {
+    const docRes = await query('SELECT * FROM documents WHERE id = $1 AND deal_id = $2', [documentId, dealId]);
+    if (!docRes.rows.length) return res.status(404).json({ error: 'Document not found for this deal' });
+    const doc = docRes.rows[0];
+    const isPdf = (doc.mime_type || '').includes('pdf') || (doc.filename || '').toLowerCase().endsWith('.pdf');
+    if (!isPdf) return res.status(400).json({ error: 'Extraction currently supports PDF documents only' });
+
+    // Create a pending record and return its id immediately.
+    const ins = await query(
+      `INSERT INTO extractions (deal_id, document_id, source_name, status)
+       VALUES ($1,$2,$3,'pending') RETURNING id, created_at`,
+      [dealId, documentId, doc.filename]
+    );
+    const extractionId = ins.rows[0].id;
+
+    // Kick off the work WITHOUT awaiting — Railway keeps the Node process
+    // alive, so this continues after we respond. No open request to time out.
+    runExtractionJob(extractionId, dealId, doc);
+
+    res.status(202).json({ extractionId, status: 'pending', sourceName: doc.filename });
+  } catch (err) {
+    console.error('[extract:start]', err.message);
+    res.status(500).json({ error: 'Could not start extraction', detail: err.message });
+  }
+});
+
+// GET /api/extract/status/:extractionId — poll for result.
+extractRouter.get('/status/:extractionId', async (req, res) => {
+  try {
+    const { rows } = await query(
+      'SELECT id, status, source_name, known_fields, extra_facts, error_detail FROM extractions WHERE id = $1',
+      [req.params.extractionId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Extraction not found' });
+    const e = rows[0];
     res.json({
-      extractionId: ins.rows[0].id,
-      sourceName: doc.filename,
-      documentId: Number(documentId),
-      knownFields: known,
-      extraFacts: extras,
-      createdAt: ins.rows[0].created_at,
+      extractionId: e.id,
+      status: e.status,
+      sourceName: e.source_name,
+      knownFields: e.known_fields || {},
+      extraFacts: e.extra_facts || [],
+      errorDetail: e.error_detail || null,
     });
   } catch (err) {
-    console.error('[extract:run]', err.message);
-    res.status(502).json({ error: 'Extraction failed', detail: err.message });
+    console.error('[extract:status]', err.message);
+    res.status(500).json({ error: 'Failed to get status' });
   }
 });
 
@@ -145,7 +177,7 @@ extractRouter.post('/:dealId', async (req, res) => {
 extractRouter.get('/:dealId/history', async (req, res) => {
   try {
     const { rows } = await query(
-      'SELECT id, document_id, source_name, known_fields, extra_facts, created_at FROM extractions WHERE deal_id = $1 ORDER BY created_at DESC',
+      "SELECT id, document_id, source_name, known_fields, extra_facts, created_at FROM extractions WHERE deal_id = $1 AND status = 'done' ORDER BY created_at DESC",
       [req.params.dealId]
     );
     res.json(rows);

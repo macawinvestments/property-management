@@ -59,9 +59,15 @@ CREATE TABLE IF NOT EXISTS extractions (
   deal_id       INTEGER NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
   document_id   INTEGER REFERENCES documents(id) ON DELETE SET NULL,
   source_name   TEXT,                   -- filename extracted from
+  status        TEXT NOT NULL DEFAULT 'done', -- pending | done | error
+  error_detail  TEXT,
   known_fields  JSONB NOT NULL DEFAULT '{}',  -- { field_key: {value, page, source_text} }
   extra_facts   JSONB NOT NULL DEFAULT '[]',  -- [ {label, value, type, page, source_text} ]
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Add status columns if the table pre-existed without them.
+ALTER TABLE extractions ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'done';
+ALTER TABLE extractions ADD COLUMN IF NOT EXISTS error_detail TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_extractions_deal ON extractions(deal_id);
